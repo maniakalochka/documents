@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from logging.config import fileConfig
 
@@ -7,10 +5,12 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.core.config import settings
 from app.database.base import Base
 from app.models.db_document import Document  # noqa: F401
 
 config = context.config
+config.set_main_option("sqlalchemy.url", settings.DB_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
