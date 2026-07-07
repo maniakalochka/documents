@@ -60,6 +60,11 @@ exclude = [
     "alembic/",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+
 [dependency-groups]
 dev = [
     "black>=26.5.1",

@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     DB_HOST: str
     DB_PORT: int
 
+    ELASTIC_URL: str
+    ELASTIC_INDEX: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
