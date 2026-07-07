@@ -28,7 +28,7 @@ repos:
         entry: env MYPYPATH=src uv run mypy --explicit-package-bases -p app
         types: [ python ]
         pass_filenames: false
-        exclude: ^src/app/migrations/
+        exclude: ^src/app/migrations/env.py
 
       - id: pytest
         name: pytest
