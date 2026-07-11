@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.router import router
 from app.core import get_logger
 from app.database import AsyncSessionLocal, engine
 from app.elastic import create_elastic_client, create_index
@@ -26,3 +27,5 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.include_router(router)

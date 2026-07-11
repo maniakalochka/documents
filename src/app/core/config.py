@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +12,7 @@ class Settings(BaseSettings):
     DB_HOST: str
     DB_PORT: int
 
+    # Elasticsearch settings
     ELASTIC_URL: str
     ELASTIC_INDEX: str
 
@@ -20,4 +23,9 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()  # type: ignore
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()  # type: ignore
+
+
+settings = get_settings()
