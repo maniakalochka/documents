@@ -59,6 +59,10 @@ docker compose up --build
 ```
 3. Перейдите в документацию по адресу 0.0.0.0/8000/docs
 
-4. Попробуйте endpoint /serch с query-параметром, скажем, `Mercedes`
+4. Попробуйте endpoint /search с query-параметром, скажем, `Mercedes`
 5. Попроубуйте удалить с помощью delete-эндпоинта по id=1
+6. Опционально запустите тесты:
+```bash
+pytest
+```
 ---
