@@ -72,38 +72,56 @@ def to_document_model(parsed: ParsedDocument) -> Document:
     )
 
 
-async def save_document(
+async def save_documents_to_postgres(
     session: AsyncSession,
-    elastic_repository: ElasticDocumentRepository,
-    parsed_document: ParsedDocument,
-) -> None:
-    document = to_document_model(parsed_document)
+    parsed_documents: list[ParsedDocument],
+) -> list[Document]:
+    documents: list[Document] = []
 
-    session.add(document)
+    for parsed_document in parsed_documents:
+        document = to_document_model(parsed_document)
+        session.add(document)
+        documents.append(document)
+
     await session.flush()
-    await elastic_repository.index_document(document)
+    await session.commit()
+
+    for document in documents:
+        await session.refresh(document)
+
+    return documents
+
+
+async def index_documents_to_elastic(
+    elastic_repository: ElasticDocumentRepository,
+    documents: list[Document],
+) -> None:
+    for document in documents:
+        await elastic_repository.index_document(document)
 
 
 async def import_csv(path: str | Path) -> None:
     parsed_documents = read_documents_from_csv(path)
 
+    async with AsyncSessionLocal() as session:
+        try:
+            documents = await save_documents_to_postgres(
+                session=session,
+                parsed_documents=parsed_documents,
+            )
+        except Exception:
+            await session.rollback()
+            raise
+
     elastic_client = create_elastic_client()
     elastic_repository = ElasticDocumentRepository(elastic_client)
 
-    await create_index(elastic_client)
-
     try:
-        async with AsyncSessionLocal() as session:
-            for parsed_document in parsed_documents:
-                await save_document(
-                    session=session,
-                    elastic_repository=elastic_repository,
-                    parsed_document=parsed_document,
-                )
-
-            await session.commit()
-    except Exception:
-        raise
+        await create_index(elastic_client)
+        await index_documents_to_elastic(
+            elastic_repository=elastic_repository,
+            documents=documents,
+        )
     finally:
         await close_elastic_client(elastic_client)
         await engine.dispose()
