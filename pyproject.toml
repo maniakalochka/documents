@@ -70,7 +70,6 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "black>=26.5.1",
-    "factory-boy>=3.3.3",
     "isort>=8.0.1",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
