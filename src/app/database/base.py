@@ -12,5 +12,4 @@ class Base(DeclarativeBase):
         DateTime,
         nullable=False,
         default=datetime.datetime.now,
-        index=True,
     )
