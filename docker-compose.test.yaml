@@ -1,0 +1,55 @@
+name: document-search-test
+
+services:
+  postgres-test:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: documents_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U test -d documents_test" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      elasticsearch-test:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@postgres-test:5432/documents_test
+      DB_URL: postgresql+asyncpg://test:test@postgres-test:5432/documents_test
+      DB_USER: test
+      DB_PASSWORD: test
+      DB_NAME: documents_test
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      ELASTIC_URL: http://elasticsearch-test:9200
+      ELASTIC_INDEX: documents_test
+      TEST_ELASTIC_URL: http://elasticsearch-test:9200
+    command: ["uv", "run", "pytest", "-q"]
+    restart: "no"
+
+  elasticsearch-test:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:9201:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s'"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
