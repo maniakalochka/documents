@@ -15,33 +15,32 @@ class DocumentService:
     async def search(
         self,
         query: str,
-        limit: int = 20,
     ) -> list[Document]:
-        document_ids = await self.elastic_repository.search_document_ids(
+        document_ids = await self.elastic_repository.get_matching_document_ids(
             query=query,
-            limit=limit,
         )
 
         if not document_ids:
             return []
 
-        documents = await self.document_repository.get_by_ids(document_ids)
-
-        documents.sort(
-            key=lambda document: document.created_date,
-            reverse=True,
+        return await self.document_repository.get_latest_by_ids(
+            document_ids,
+            limit=20,
         )
 
-        return documents[:limit]
-
     async def delete(self, document_id: int) -> bool:
+        await self.document_repository.lock_synchronization()
         document = await self.document_repository.get_by_id(document_id)
+        pending = await self.document_repository.has_pending_deletion(document_id)
 
-        if document is None:
-            return False
-
-        await self.document_repository.delete(document)
-        await self.document_repository.commit()
+        if document is not None:
+            await self.document_repository.delete(document)
+            await self.document_repository.queue_index_deletion(document_id)
+            await self.document_repository.commit()
         await self.elastic_repository.delete_document(document_id)
+        if document is not None or pending:
+            await self.document_repository.finish_index_deletion(document_id)
+            await self.document_repository.commit()
+            return True
 
-        return True
+        return False

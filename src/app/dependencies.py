@@ -1,11 +1,9 @@
-from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_async_session
-from app.elastic.client import create_elastic_client
 from app.elastic.repository import ElasticDocumentRepository
 from app.repositories.document import DocumentRepository
 from app.services.document import DocumentService
@@ -17,12 +15,8 @@ async def get_document_repository(
     return DocumentRepository(session)
 
 
-async def get_elastic_repository() -> AsyncGenerator[ElasticDocumentRepository]:
-    client = create_elastic_client()
-    try:
-        yield ElasticDocumentRepository(client)
-    finally:
-        await client.close()
+async def get_elastic_repository(request: Request) -> ElasticDocumentRepository:
+    return ElasticDocumentRepository(request.app.state.elastic, request.app.state.elastic_index)
 
 
 async def get_document_service(

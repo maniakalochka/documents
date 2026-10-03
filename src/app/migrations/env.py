@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import settings
 from app.database.base import Base
+from app.models import synchronization  # noqa: F401
 from app.models.db_document import Document  # noqa: F401
 
 config = context.config

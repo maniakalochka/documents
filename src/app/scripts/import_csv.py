@@ -2,12 +2,17 @@ import argparse
 import ast
 import asyncio
 import csv
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from elasticsearch import AsyncElasticsearch
+from elasticsearch.helpers import async_bulk
+from sqlalchemy import delete, func, insert, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core import get_logger
 from app.database import AsyncSessionLocal, engine
 from app.elastic import (
     ElasticDocumentRepository,
@@ -16,6 +21,10 @@ from app.elastic import (
     create_index,
 )
 from app.models.db_document import Document
+from app.models.synchronization import import_batches, pending_index_deletions
+
+logger = get_logger(__name__)
+SYNCHRONIZATION_LOCK = 84732
 
 
 @dataclass(slots=True)
@@ -58,8 +67,16 @@ def read_documents_from_csv(path: str | Path) -> list[ParsedDocument]:
 
     with csv_path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
+        required_columns = {"text", "created_date", "rubrics"}
+        if not required_columns.issubset(reader.fieldnames or []):
+            raise ValueError("CSV must contain text, created_date and rubrics columns")
         for row in reader:
-            documents.append(parse_csv_row(row))
+            try:
+                documents.append(parse_csv_row(row))
+            except (KeyError, ValueError, SyntaxError, AttributeError, TypeError) as exc:
+                raise ValueError(
+                    f"Invalid CSV record ending at line {reader.line_num}: {exc}"
+                ) from exc
 
     return documents
 
@@ -84,11 +101,6 @@ async def save_documents_to_postgres(
         documents.append(document)
 
     await session.flush()
-    await session.commit()
-
-    for document in documents:
-        await session.refresh(document)
-
     return documents
 
 
@@ -96,35 +108,98 @@ async def index_documents_to_elastic(
     elastic_repository: ElasticDocumentRepository,
     documents: list[Document],
 ) -> None:
-    for document in documents:
-        await elastic_repository.index_document(document)
+    await async_bulk(
+        elastic_repository.client,
+        (
+            {
+                "_index": elastic_repository.index_name,
+                "_id": str(document.id),
+                "_source": {"id": document.id, "text": document.text},
+            }
+            for document in documents
+        ),
+        chunk_size=500,
+    )
 
 
-async def import_csv(path: str | Path) -> None:
-    parsed_documents = read_documents_from_csv(path)
-
-    async with AsyncSessionLocal() as session:
-        try:
-            documents = await save_documents_to_postgres(
-                session=session,
-                parsed_documents=parsed_documents,
-            )
-        except Exception:
-            await session.rollback()
-            raise
-
-    elastic_client = create_elastic_client()
-    elastic_repository = ElasticDocumentRepository(elastic_client)
-
-    try:
-        await create_index(elastic_client)
-        await index_documents_to_elastic(
-            elastic_repository=elastic_repository,
-            documents=documents,
+async def synchronize_index(
+    session_factory: async_sessionmaker[AsyncSession],
+    elastic_repository: ElasticDocumentRepository,
+) -> None:
+    """Repair the index from PostgreSQL; safe to retry after a partially failed bulk request."""
+    await create_index(elastic_repository.client, elastic_repository.index_name)
+    async with session_factory() as session:
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"), {"key": SYNCHRONIZATION_LOCK}
         )
+        result = await session.execute(select(Document))
+        documents = list(result.scalars().all())
+        await elastic_repository.client.indices.refresh(index=elastic_repository.index_name)
+        existing_ids = await elastic_repository.get_document_ids({"match_all": {}})
+        document_ids = {document.id for document in documents}
+        await index_documents_to_elastic(elastic_repository, documents)
+        stale_ids = set(existing_ids) - document_ids
+        if stale_ids:
+            await async_bulk(
+                elastic_repository.client,
+                (
+                    {
+                        "_op_type": "delete",
+                        "_index": elastic_repository.index_name,
+                        "_id": str(doc_id),
+                    }
+                    for doc_id in stale_ids
+                ),
+                ignore_status=(404,),
+            )
+        await elastic_repository.client.indices.refresh(index=elastic_repository.index_name)
+        await session.execute(delete(pending_index_deletions))
+        await session.commit()
+        logger.info(
+            "Index synchronized: %s documents, %s stale IDs removed", len(documents), len(stale_ids)
+        )
+
+
+async def import_csv(
+    path: str | Path,
+    session_factory: async_sessionmaker[AsyncSession] = AsyncSessionLocal,
+    elastic_client: AsyncElasticsearch | None = None,
+    index_name: str | None = None,
+) -> None:
+    client = elastic_client if elastic_client is not None else create_elastic_client()
+    try:
+        parsed_documents = await asyncio.to_thread(read_documents_from_csv, path)
+        file_content = await asyncio.to_thread(Path(path).read_bytes)
+        checksum = hashlib.sha256(file_content).hexdigest()
+        async with session_factory() as session:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": SYNCHRONIZATION_LOCK}
+            )
+            imported = await session.scalar(
+                select(import_batches.c.checksum).where(import_batches.c.checksum == checksum)
+            )
+            if imported is None:
+                has_batches = await session.scalar(select(func.count()).select_from(import_batches))
+                has_documents = await session.scalar(select(func.count()).select_from(Document))
+                if not has_batches and has_documents:
+                    raise RuntimeError(
+                        "Database contains documents from an untracked import. "
+                        "Use reindex to preserve them, or import into a fresh database."
+                    )
+                await save_documents_to_postgres(session, parsed_documents)
+                await session.execute(insert(import_batches).values(checksum=checksum))
+                await session.commit()
+                logger.info("CSV imported: %s documents", len(parsed_documents))
+            else:
+                logger.info("CSV already imported; repairing index without adding documents")
+        await synchronize_index(session_factory, ElasticDocumentRepository(client, index_name))
     finally:
-        await close_elastic_client(elastic_client)
-        await engine.dispose()
+        try:
+            if elastic_client is None:
+                await close_elastic_client(client)
+        finally:
+            if session_factory is AsyncSessionLocal:
+                await engine.dispose()
 
 
 def parse_args() -> argparse.Namespace:
