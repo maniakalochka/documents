@@ -63,8 +63,10 @@ async def test_search_returns_twenty_newest_matching_documents_and_all_fields(
     assert [row["id"] for row in response.json()] == [document.id for document in expected]
     assert all(set(row) == {"id", "text", "rubrics", "created_date"} for row in response.json())
     assert (await api_client.get("/documents/search", params={"q": "absentword"})).json() == []
-    for query in ("", "   "):
-        assert (await api_client.get("/documents/search", params={"q": query})).status_code == 422
+    assert (await api_client.get("/documents/search", params={"q": ""})).status_code == 422
+    whitespace_query = await api_client.get("/documents/search", params={"q": "   "})
+    assert whitespace_query.status_code == 422
+    assert whitespace_query.json() == {"detail": "Query must contain non-whitespace characters"}
     assert (await api_client.get("/ready")).status_code == 200
 
 

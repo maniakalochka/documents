@@ -11,7 +11,21 @@ router = APIRouter(prefix="/documents", tags=["documents"])
     "/search",
     response_model=list[DocumentResponse],
     summary="Return up to 20 matching documents, newest first",
-    responses={503: {"description": "Storage temporarily unavailable"}},
+    responses={
+        422: {
+            "description": "Query cannot be empty or whitespace-only",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    }
+                }
+            },
+        },
+        503: {"description": "Storage temporarily unavailable"},
+    },
 )
 async def search_documents(
     q: str = Query(..., min_length=1, description="Text search query"),
