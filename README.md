@@ -6,7 +6,7 @@ PostgreSQL хранит `id`, `text`, `rubrics`, `created_date`; индекс с
 
 ## Быстрый запуск в Docker
 
-Требуются Docker Desktop / Docker Engine с Compose v2 и свободные порты 8000, 5432, 9200.
+Требуются Docker Desktop / Docker Engine с Compose v2 и свободные порты 8000, 5433, 9200.
 Команды выполняются из корня репозитория:
 
 ```bash
@@ -101,7 +101,7 @@ docker compose --profile tools run --rm import_csv
 
 ## Локальная разработка и тесты
 
-Требуются Python 3.13+ и uv. На хосте используются `localhost:5432` и `localhost:9200`;
+Требуются Python 3.13+ и uv. На хосте используются `localhost:5433` и `localhost:9200`;
 в контейнерах Compose переопределяет адреса на `postgres` и `elasticsearch`.
 
 ```bash
@@ -117,7 +117,7 @@ docker compose -f docker-compose.test.yaml up -d --wait postgres-test elasticsea
 uv run pytest
 ```
 
-`TEST_DATABASE_URL` в `.env` указывает на `localhost:5433/documents_test`,
+`TEST_DATABASE_URL` в `.env` указывает на `localhost:5434/documents_test`,
 `TEST_ELASTIC_URL` — на `http://localhost:9201` (оба приведены в `.env.example`).
 Тесты сами применяют миграции, очищают только тестовые таблицы и создают отдельный ES-индекс
 на каждый тест. URL другой базы отклоняется перед миграциями и очисткой.
